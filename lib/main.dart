@@ -9,7 +9,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   await NotificationService().init();
-  runApp(const MyApp()); // Remova o 'const' se o VS Code reclamar novamente
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -26,19 +26,47 @@ class MyApp extends StatelessWidget {
         appBarTheme: AppBarTheme(
           backgroundColor: Colors.indigo[50],
           centerTitle: true,
-          titleTextStyle: const TextStyle(color: Colors.indigo, fontSize: 20, fontWeight: FontWeight.bold),
+          titleTextStyle: const TextStyle(
+            color: Colors.indigo, 
+            fontSize: 20, 
+            fontWeight: FontWeight.bold
+          ),
         ),
       ),
-      // O segredo de não pedir login toda vez:
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
-          }
-          return snapshot.hasData ? const HomePage() : LoginPage();
-        },
-      ),
+      // Definimos as rotas explicitamente para que o Navigator as encontre
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const AuthWrapper(),
+        '/login': (context) => LoginPage(),
+        '/home': (context) => const HomePage(),
+      },
+    );
+  }
+}
+
+// Widget auxiliar que gerencia o estado da sessão (O segredo do login persistente)
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Enquanto o Firebase checa a sessão, mostra o spinner
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        
+        // Se tem usuário logado, vai para Home. Se não, vai para Login.
+        if (snapshot.hasData) {
+          return const HomePage();
+        } else {
+          return LoginPage();
+        }
+      },
     );
   }
 }

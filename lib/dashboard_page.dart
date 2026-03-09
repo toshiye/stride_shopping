@@ -11,7 +11,8 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> with SingleTickerProviderStateMixin {
+class _DashboardPageState extends State<DashboardPage>
+    with SingleTickerProviderStateMixin {
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
   String? _familiaId;
@@ -22,7 +23,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   void initState() {
     super.initState();
     _getFamiliaId();
-    _blinkController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..repeat(reverse: true);
+    _blinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
   }
 
   @override
@@ -32,7 +36,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   }
 
   Future<void> _getFamiliaId() async {
-    final userDoc = await _db.collection('usuarios').doc(_auth.currentUser!.uid).get();
+    final userDoc = await _db
+        .collection('usuarios')
+        .doc(_auth.currentUser!.uid)
+        .get();
     if (mounted) {
       setState(() {
         _familiaId = userDoc.data()?['familiaId'];
@@ -50,14 +57,25 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
         content: TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: "Valor (R\$)", prefixText: "R\$ "),
+          decoration: const InputDecoration(
+            labelText: "Valor (R\$)",
+            prefixText: "R\$ ",
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancelar"),
+          ),
           TextButton(
             onPressed: () async {
-              double novoValor = double.tryParse(controller.text.replaceAll(',', '.')) ?? _metaMensal;
-              await _db.collection('usuarios').doc(_auth.currentUser!.uid).update({'metaMensal': novoValor});
+              double novoValor =
+                  double.tryParse(controller.text.replaceAll(',', '.')) ??
+                  _metaMensal;
+              await _db
+                  .collection('usuarios')
+                  .doc(_auth.currentUser!.uid)
+                  .update({'metaMensal': novoValor});
               setState(() => _metaMensal = novoValor);
               Navigator.pop(context);
             },
@@ -70,14 +88,16 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    if (_familiaId == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_familiaId == null)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       appBar: AppBar(title: const Text("Dashboard Indigo")),
       body: StreamBuilder<DocumentSnapshot>(
         stream: _db.collection('estatisticas').doc(_familiaId).snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: Text("Sem dados."));
+          if (!snapshot.hasData || !snapshot.data!.exists)
+            return const Center(child: Text("Sem dados."));
 
           final rawData = snapshot.data!.data() as Map<String, dynamic>;
           final Map<String, double> gastosMensais = {};
@@ -85,14 +105,31 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           final Map<String, double> gastoTotalPorItem = {};
 
           rawData.forEach((key, value) {
-            if (key.startsWith('gastosMensais.')) gastosMensais[key.split('.').last] = (value as num).toDouble();
-            if (key.startsWith('quantidadeAcumulada.')) quantidades[key.split('.').last] = (value as num).toInt();
-            if (key.startsWith('gastoTotalPorItem.')) gastoTotalPorItem[key.split('.').last] = (value as num).toDouble();
+            if (key.startsWith('gastosMensais.')) {
+              gastosMensais[key.split('.').last] = (value as num).toDouble();
+            }
+            if (key.startsWith('quantidadeAcumulada.')) {
+              quantidades[key.split('.').last] = (value as num).toInt();
+            }
+            if (key.startsWith('gastoTotalPorItem.')) {
+              gastoTotalPorItem[key.split('.').last] = (value as num)
+                  .toDouble();
+            }
           });
 
-          double gastoMes = gastosMensais[DateFormat('yyyy_MM').format(DateTime.now())] ?? 0.0;
-          double progresso = (gastoMes / _metaMensal).clamp(0.0, 1.0);
-          bool alerta90 = gastoMes >= (_metaMensal * 0.9);
+          // Lógica de Comparação Mensal
+          String mesAtualKey = DateFormat('yyyy_MM').format(DateTime.now());
+          DateTime mesPassadoDT = DateTime(
+            DateTime.now().year,
+            DateTime.now().month - 1,
+          );
+          String mesPassadoKey = DateFormat('yyyy_MM').format(mesPassadoDT);
+
+          double gastoMesAtual = gastosMensais[mesAtualKey] ?? 0.0;
+          double gastoMesPassado = gastosMensais[mesPassadoKey] ?? 0.0;
+
+          double progresso = (gastoMesAtual / _metaMensal).clamp(0.0, 1.0);
+          bool alerta90 = gastoMesAtual >= (_metaMensal * 0.9);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -101,16 +138,30 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 InkWell(
                   onTap: _definirOrcamento,
                   borderRadius: BorderRadius.circular(20),
-                  child: _buildBudgetCard(gastoMes, progresso, alerta90),
+                  child: _buildBudgetCard(gastoMesAtual, progresso, alerta90),
                 ),
+                const SizedBox(height: 15),
+                _buildComparisonCard(gastoMesAtual, gastoMesPassado), // NOVO
+                const SizedBox(height: 15),
+                _buildSummaryCard(gastoMesAtual),
                 const SizedBox(height: 20),
-                _buildSummaryCard(gastoMes),
-                const SizedBox(height: 30),
-                const Text("Evolução Mensal (R\$)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+                const Text(
+                  "Evolução Mensal (R\$)",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 _buildBarChart(gastosMensais),
                 const SizedBox(height: 30),
-                const Text("Top Consumo e Preço Médio", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+                const Text(
+                  "Top Consumo e Preço Médio",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
                 _buildTopProducts(quantidades, gastoTotalPorItem),
               ],
             ),
@@ -129,19 +180,97 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text("Orçamento Mensal", style: TextStyle(color: Colors.white70)),
-              if (alerta) FadeTransition(opacity: _blinkController, child: const Icon(Icons.warning_amber, color: Colors.orangeAccent)),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Orçamento Mensal",
+                  style: TextStyle(color: Colors.white70),
+                ),
+                if (alerta)
+                  FadeTransition(
+                    opacity: _blinkController,
+                    child: const Icon(
+                      Icons.warning_amber,
+                      color: Colors.orangeAccent,
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 10),
-            Text("R\$ ${atual.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+            Text(
+              "R\$ ${atual.toStringAsFixed(2)}",
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 15),
-            LinearProgressIndicator(value: progresso, color: alerta ? Colors.orangeAccent : Colors.blueAccent, backgroundColor: Colors.white10, minHeight: 8),
+            LinearProgressIndicator(
+              value: progresso,
+              color: alerta ? Colors.orangeAccent : Colors.blueAccent,
+              backgroundColor: Colors.white10,
+              minHeight: 8,
+            ),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text("Meta: R\$ ${_metaMensal.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white60, fontSize: 12)),
+              child: Text(
+                "Meta: R\$ ${_metaMensal.toStringAsFixed(2)}",
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // NOVO: Card de Comparação de Economia
+  Widget _buildComparisonCard(double atual, double passado) {
+    if (passado == 0) {
+      return const Card(
+        child: ListTile(
+          leading: Icon(Icons.auto_awesome, color: Colors.amber),
+          title: Text(
+            "Bem-vindo à Stride!",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          subtitle: Text(
+            "Continue usando para ver seu comparativo de economia no mês que vem.",
+            style: TextStyle(fontSize: 12),
+          ),
+        ),
+      );
+    }
+
+    double diferenca = atual - passado;
+    bool economizou = diferenca <= 0;
+    double percentual = (diferenca / passado * 100).abs();
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: economizou ? Colors.green[50] : Colors.red[50],
+          child: Icon(
+            economizou ? Icons.trending_down : Icons.trending_up,
+            color: economizou ? Colors.green : Colors.red,
+          ),
+        ),
+        title: Text(
+          economizou
+              ? "Economia de ${percentual.toStringAsFixed(1)}%"
+              : "Gasto ${percentual.toStringAsFixed(1)}% maior",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: economizou ? Colors.green[900] : Colors.red[900],
+            fontSize: 14,
+          ),
+        ),
+        subtitle: Text(
+          "R\$ ${diferenca.abs().toStringAsFixed(2)} ${economizou ? 'a menos' : 'a mais'} que o mês passado",
+          style: const TextStyle(fontSize: 12),
         ),
       ),
     );
@@ -151,8 +280,14 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     return Card(
       child: ListTile(
         leading: const Icon(Icons.account_balance_wallet, color: Colors.indigo),
-        title: const Text("Gasto no Mês Atual", style: TextStyle(fontSize: 12)),
-        subtitle: Text("R\$ ${gastoMes.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Total Acumulado no Mês",
+          style: TextStyle(fontSize: 12),
+        ),
+        subtitle: Text(
+          "R\$ ${gastoMes.toStringAsFixed(2)}",
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -166,36 +301,73 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           gridData: const FlGridData(show: true, drawVerticalLine: false),
           borderData: FlBorderData(show: false),
           titlesData: FlTitlesData(
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                reservedSize: 50, // Espaço ajustado para os números não "voarem"
-                getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(fontSize: 10)),
+                reservedSize: 50,
+                getTitlesWidget: (value, meta) => Text(
+                  value.toInt().toString(),
+                  style: const TextStyle(fontSize: 10),
+                ),
               ),
             ),
           ),
-          barGroups: List.generate(keys.length, (i) => BarChartGroupData(x: i, barRods: [
-            BarChartRodData(toY: gastos[keys[i]]!, color: Colors.indigo, width: 18, borderRadius: BorderRadius.circular(4))
-          ])),
+          barGroups: List.generate(
+            keys.length,
+            (i) => BarChartGroupData(
+              x: i,
+              barRods: [
+                BarChartRodData(
+                  toY: gastos[keys[i]]!,
+                  color: Colors.indigo,
+                  width: 18,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildTopProducts(Map<String, int> quantidades, Map<String, double> gastoFinanceiro) {
-    var entries = quantidades.entries.toList()..sort((a,b) => b.value.compareTo(a.value));
+  Widget _buildTopProducts(
+    Map<String, int> quantidades,
+    Map<String, double> gastoFinanceiro,
+  ) {
+    var entries = quantidades.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
     return Column(
       children: entries.take(5).map((item) {
         int index = entries.indexOf(item) + 1;
         final media = (gastoFinanceiro[item.key] ?? 0.0) / item.value;
         return ListTile(
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => ItemDetailPage(itemName: item.key, familiaId: _familiaId!))),
-          leading: CircleAvatar(backgroundColor: Colors.indigo[50], child: Text("$index", style: const TextStyle(color: Colors.indigo))),
-          title: Text(item.key.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (c) =>
+                  ItemDetailPage(itemName: item.key, familiaId: _familiaId!),
+            ),
+          ),
+          leading: CircleAvatar(
+            backgroundColor: Colors.indigo[50],
+            child: Text("$index", style: const TextStyle(color: Colors.indigo)),
+          ),
+          title: Text(
+            item.key.toUpperCase(),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           subtitle: Text("Preço Médio: R\$ ${media.toStringAsFixed(2)}"),
-          trailing: Text("${item.value} un", style: const TextStyle(fontWeight: FontWeight.bold)),
+          trailing: Text(
+            "${item.value} un",
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         );
       }).toList(),
     );
