@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-/* import 'package:firebase_messaging/firebase_messaging.dart'; */
 import 'app_drawer.dart';
 import 'notification_service.dart';
+import 'voice_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -14,6 +14,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _auth = FirebaseAuth.instance;
   final _db = FirebaseFirestore.instance;
+  final VoiceService _voiceService = VoiceService();
   String? _familiaId;
 
   @override
@@ -29,21 +30,22 @@ class _HomePageState extends State<HomePage> {
         _familiaId = userDoc.data()?['familiaId'];
       });
       
+      // Inicializa Notificações
       String? token = await NotificationService().getToken();
       if (token != null) {
-        await _db.collection('usuarios').doc(_auth.currentUser!.uid).update({
-          'fcmToken': token,
-        });
+        await _db.collection('usuarios').doc(_auth.currentUser!.uid).update({'fcmToken': token});
       }
+
+      // Inicializa Motor de Voz
+      await _voiceService.initVoice();
     }
   }
 
   Future<void> _finalizarCompra(List<QueryDocumentSnapshot> docs, double valorTotal) async {
     if (docs.isEmpty) return;
-
     WriteBatch batch = _db.batch();
-
     DocumentReference histRef = _db.collection('historico').doc();
+    
     batch.set(histRef, {
       'familiaId': _familiaId,
       'dataCompra': FieldValue.serverTimestamp(),
@@ -61,9 +63,7 @@ class _HomePageState extends State<HomePage> {
 
     await batch.commit();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Compra finalizada e salva!")),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Compra finalizada e salva!")));
     }
   }
 
@@ -91,10 +91,7 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancelar"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
           TextButton(
             onPressed: () {
               String precoTexto = precoController.text.replaceAll(',', '.');
@@ -113,9 +110,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_familiaId == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+    if (_familiaId == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       appBar: AppBar(
@@ -127,13 +122,11 @@ class _HomePageState extends State<HomePage> {
               if (!snapshot.hasData) return const SizedBox();
               final docs = snapshot.data!.docs;
               double total = docs.fold(0.0, (acum, doc) => acum + ((doc['preco'] ?? 0.0) * (doc['quantidade'] ?? 1)));
-
+              
               return Row(
                 children: [
-                  Text(
-                    "R\$ ${total.toStringAsFixed(2)}",
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.indigo),
-                  ),
+                  Text("R\$ ${total.toStringAsFixed(2)}", 
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.indigo)),
                   IconButton(
                     icon: const Icon(Icons.check_circle_outline, color: Colors.indigo),
                     onPressed: docs.isEmpty ? null : () => _finalizarCompra(docs, total),
@@ -142,24 +135,6 @@ class _HomePageState extends State<HomePage> {
               );
             },
           ),
-          /* // SINO: Notificação Local
-          IconButton(
-            icon: const Icon(Icons.notifications_active, color: Colors.indigo),
-            onPressed: () {
-              NotificationService().showTestNotification();
-            },
-          ),
-          // NUVEM: Simulação de Recebimento
-          IconButton(
-            icon: const Icon(Icons.cloud_download, color: Colors.orange),
-            onPressed: () {
-              // Chamamos o método de exibição para provar que o app está pronto para receber
-              NotificationService().showTestNotification();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Simulação de mensagem remota disparada!")),
-              );
-            },
-          ), */
         ],
       ),
       drawer: const AppDrawer(),
@@ -174,9 +149,7 @@ class _HomePageState extends State<HomePage> {
             .orderBy('finalizado', descending: false)
             .snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final docs = snapshot.data!.docs;
 
           return ListView.builder(
@@ -193,24 +166,18 @@ class _HomePageState extends State<HomePage> {
                   leading: Checkbox(
                     value: finalizado,
                     activeColor: Colors.indigo,
-                    onChanged: (val) {
-                      item.reference.update({'finalizado': val});
-                    },
+                    onChanged: (val) => item.reference.update({'finalizado': val}),
                   ),
-                  title: Text(
-                    item['nome'].toString().toUpperCase(),
+                  title: Text(item['nome'].toString().toUpperCase(), 
                     style: TextStyle(
                       decoration: finalizado ? TextDecoration.lineThrough : null,
                       fontWeight: FontWeight.bold,
-                      color: finalizado ? Colors.grey : Colors.indigo[900],
-                    ),
-                  ),
+                      color: finalizado ? Colors.grey : Colors.indigo[900]
+                    )),
                   subtitle: Text("${item['quantidade']}x R\$ ${item['preco'].toStringAsFixed(2)} = R\$ ${precoTotal.toStringAsFixed(2)}"),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                    onPressed: () {
-                      item.reference.delete();
-                    },
+                    onPressed: () => item.reference.delete(),
                   ),
                 ),
               );
@@ -223,37 +190,101 @@ class _HomePageState extends State<HomePage> {
 
   void _exibirDialogoAdicionar() {
     final controller = TextEditingController();
+    bool isListening = false;
+
+    // Função interna para processar comando natural e salvar (Usando RegEx para Nomes Compostos)
+    void processarESalvar(String texto) {
+      // Regex que procura a palavra 'adicionar' no início, seguida de um ou mais espaços, 
+      // e captura TODO o restante da frase como o nome do item.
+      final regExp = RegExp(r'^adicionar\s+(.+)$', caseSensitive: false);
+      final match = regExp.firstMatch(texto.trim());
+      
+      if (match != null) {
+        String nomeItem = match.group(1)!.trim(); // Captura o item completo (ex: "batata frita")
+        
+        if (nomeItem.isNotEmpty) {
+          _db.collection('compras').add({
+            'nome': nomeItem,
+            'finalizado': false,
+            'familiaId': _familiaId,
+            'quantidade': 1,
+            'preco': 0.0,
+            'criadoEm': FieldValue.serverTimestamp(),
+          });
+          
+          _voiceService.stopListening();
+          Navigator.pop(context); // Fecha o diálogo sozinho após o sucesso
+        }
+      } else {
+        // Caso você não diga "adicionar", ele apenas transcreve para o campo de texto
+        controller.text = texto;
+      }
+    }
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Novo Item"),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: "Ex: Arroz"),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Comando de Voz Natural"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Diga 'Adicionar [item composto]'", 
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      decoration: const InputDecoration(hintText: "Ouvindo..."),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      isListening ? Icons.mic : Icons.mic_none,
+                      color: isListening ? Colors.red : Colors.indigo,
+                    ),
+                    onPressed: () {
+                      if (!isListening) {
+                        setDialogState(() => isListening = true);
+                        _voiceService.startListening((text) {
+                          setDialogState(() {
+                            processarESalvar(text);
+                            isListening = false;
+                          });
+                        });
+                      } else {
+                        _voiceService.stopListening();
+                        setDialogState(() => isListening = false);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+            TextButton(
+              onPressed: () {
+                if (controller.text.isNotEmpty) {
+                  _db.collection('compras').add({
+                    'nome': controller.text,
+                    'finalizado': false,
+                    'familiaId': _familiaId,
+                    'quantidade': 1,
+                    'preco': 0.0,
+                    'criadoEm': FieldValue.serverTimestamp(),
+                  });
+                }
+                Navigator.pop(context);
+              }, 
+              child: const Text("Adicionar", style: TextStyle(color: Colors.indigo))
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancelar"),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                _db.collection('compras').add({
-                  'nome': controller.text,
-                  'finalizado': false,
-                  'familiaId': _familiaId,
-                  'quantidade': 1,
-                  'preco': 0.0,
-                  'criadoEm': FieldValue.serverTimestamp(),
-                });
-              }
-              Navigator.pop(context);
-            },
-            child: const Text("Adicionar", style: TextStyle(color: Colors.indigo)),
-          ),
-        ],
       ),
     );
   }
