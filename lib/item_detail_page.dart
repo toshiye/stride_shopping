@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart'; // <--- ADICIONADO: Essencial para o DateFormat
 
 class ItemDetailPage extends StatelessWidget {
   final String itemName;
@@ -14,28 +15,33 @@ class ItemDetailPage extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('historico')
             .where('familiaId', isEqualTo: familiaId)
-            .orderBy('dataCompra', descending: false).snapshots(),
+            .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           
-          List<FlSpot> spots = [];
           List<Map<String, dynamic>> registros = [];
-          int i = 0;
-
           for (var doc in snapshot.data!.docs) {
             final itens = doc['itens'] as List;
             final data = (doc['dataCompra'] as Timestamp?)?.toDate() ?? DateTime.now();
             for (var item in itens) {
               if (item['nome'] == itemName.toLowerCase()) {
-                double preco = (item['precoUnitario'] as num).toDouble();
-                spots.add(FlSpot(i.toDouble(), preco));
-                registros.add({'data': data, 'preco': preco});
-                i++;
+                registros.add({
+                  'data': data,
+                  'preco': (item['precoUnitario'] as num).toDouble(),
+                });
               }
             }
           }
 
-          if (spots.isEmpty) return const Center(child: Text("Nenhum histórico encontrado."));
+          // Ordenação manual por data (crescente para o gráfico)
+          registros.sort((a, b) => a['data'].compareTo(b['data']));
+
+          List<FlSpot> spots = [];
+          for (int i = 0; i < registros.length; i++) {
+            spots.add(FlSpot(i.toDouble(), registros[i]['preco']));
+          }
+
+          if (spots.isEmpty) return const Center(child: Text("Nenhum histórico encontrado para este item."));
 
           return Padding(
             padding: const EdgeInsets.all(16.0),
@@ -43,11 +49,35 @@ class ItemDetailPage extends StatelessWidget {
               children: [
                 const Text("Evolução do Preço Unitário", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
                 const SizedBox(height: 20),
-                SizedBox(height: 200, child: LineChart(LineChartData(
-                  lineBarsData: [LineChartBarData(spots: spots, color: Colors.indigo, isCurved: true, barWidth: 4, dotData: const FlDotData(show: true))],
-                  gridData: const FlGridData(show: false),
-                  borderData: FlBorderData(show: false),
-                ))),
+                SizedBox(
+                  height: 200, 
+                  child: LineChart(
+                    LineChartData(
+                      gridData: const FlGridData(show: true, drawVerticalLine: false),
+                      borderData: FlBorderData(show: false),
+                      titlesData: FlTitlesData(
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 50, // Espaço ajustado para o preço não voar
+                            getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(1), style: const TextStyle(fontSize: 10)),
+                          ),
+                        ),
+                      ),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: spots, 
+                          color: Colors.indigo, 
+                          isCurved: true, 
+                          barWidth: 4, 
+                          dotData: const FlDotData(show: true)
+                        )
+                      ],
+                    )
+                  )
+                ),
                 const SizedBox(height: 30),
                 const Divider(),
                 const Text("Registros Encontrados", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -56,11 +86,12 @@ class ItemDetailPage extends StatelessWidget {
                   child: ListView.builder(
                     itemCount: registros.length,
                     itemBuilder: (context, index) {
-                      final reg = registros[registros.length - 1 - index]; // Ordem inversa
+                      // Mostramos do mais novo para o mais velho na lista
+                      final reg = registros[registros.length - 1 - index];
                       return ListTile(
                         leading: const Icon(Icons.history, color: Colors.indigo),
                         title: Text("R\$ ${reg['preco'].toStringAsFixed(2)}"),
-                        subtitle: Text("Data: ${reg['data'].day}/${reg['data'].month}/${reg['data'].year}"),
+                        subtitle: Text("Data: ${DateFormat('dd/MM/yyyy').format(reg['data'])}"),
                       );
                     },
                   ),

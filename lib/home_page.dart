@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'app_drawer.dart';
 import 'notification_service.dart';
 
@@ -22,12 +23,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _inicializarApp() async {
-    final userDoc = await _db
-        .collection('usuarios')
-        .doc(_auth.currentUser!.uid)
-        .get();
+    final userDoc = await _db.collection('usuarios').doc(_auth.currentUser!.uid).get();
     if (mounted) {
-      setState(() => _familiaId = userDoc.data()?['familiaId']);
+      setState(() {
+        _familiaId = userDoc.data()?['familiaId'];
+      });
+      
       String? token = await NotificationService().getToken();
       if (token != null) {
         await _db.collection('usuarios').doc(_auth.currentUser!.uid).update({
@@ -37,33 +38,23 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // --- RESTAURADO: Função para Finalizar e Salvar no Histórico ---
-  Future<void> _finalizarCompra(
-    List<QueryDocumentSnapshot> docs,
-    double valorTotal,
-  ) async {
+  Future<void> _finalizarCompra(List<QueryDocumentSnapshot> docs, double valorTotal) async {
     if (docs.isEmpty) return;
 
     WriteBatch batch = _db.batch();
 
-    // 1. Cria o registro no histórico
     DocumentReference histRef = _db.collection('historico').doc();
     batch.set(histRef, {
       'familiaId': _familiaId,
       'dataCompra': FieldValue.serverTimestamp(),
       'valorTotalCompra': valorTotal,
-      'itens': docs
-          .map(
-            (doc) => {
-              'nome': doc['nome'].toString().trim().toLowerCase(),
-              'quantidade': doc['quantidade'] ?? 1,
-              'precoUnitario': (doc['preco'] ?? 0.0).toDouble(),
-            },
-          )
-          .toList(),
+      'itens': docs.map((doc) => {
+        'nome': doc['nome'].toString().trim().toLowerCase(),
+        'quantidade': doc['quantidade'] ?? 1,
+        'precoUnitario': (doc['preco'] ?? 0.0).toDouble(),
+      }).toList(),
     });
 
-    // 2. Limpa a lista de compras atual
     for (var doc in docs) {
       batch.delete(doc.reference);
     }
@@ -77,13 +68,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _editarItem(DocumentSnapshot doc) {
-    // CORREÇÃO: Usar .replaceAll para aceitar vírgula e converter para ponto
-    final precoController = TextEditingController(
-      text: doc['preco'].toString(),
-    );
-    final qtdController = TextEditingController(
-      text: doc['quantidade'].toString(),
-    );
+    final precoController = TextEditingController(text: doc['preco'].toString());
+    final qtdController = TextEditingController(text: doc['quantidade'].toString());
 
     showDialog(
       context: context,
@@ -94,13 +80,8 @@ class _HomePageState extends State<HomePage> {
           children: [
             TextField(
               controller: precoController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ), // Teclado com ponto/vírgula
-              decoration: const InputDecoration(
-                labelText: "Preço Unitário",
-                prefixText: "R\$ ",
-              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: "Preço Unitário", prefixText: "R\$ "),
             ),
             TextField(
               controller: qtdController,
@@ -116,9 +97,7 @@ class _HomePageState extends State<HomePage> {
           ),
           TextButton(
             onPressed: () {
-              // Limpa a string para evitar erros de digitação (troca vírgula por ponto)
               String precoTexto = precoController.text.replaceAll(',', '.');
-
               doc.reference.update({
                 'preco': double.tryParse(precoTexto) ?? 0.0,
                 'quantidade': int.tryParse(qtdController.text) ?? 1,
@@ -134,55 +113,53 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_familiaId == null)
+    if (_familiaId == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: Text("Lista: $_familiaId"),
         actions: [
           StreamBuilder<QuerySnapshot>(
-            stream: _db
-                .collection('compras')
-                .where('familiaId', isEqualTo: _familiaId)
-                .snapshots(),
+            stream: _db.collection('compras').where('familiaId', isEqualTo: _familiaId).snapshots(),
             builder: (context, snapshot) {
               if (!snapshot.hasData) return const SizedBox();
               final docs = snapshot.data!.docs;
-              double total = docs.fold(
-                0.0,
-                (acum, doc) =>
-                    acum + ((doc['preco'] ?? 0.0) * (doc['quantidade'] ?? 1)),
-              );
+              double total = docs.fold(0.0, (acum, doc) => acum + ((doc['preco'] ?? 0.0) * (doc['quantidade'] ?? 1)));
 
               return Row(
                 children: [
                   Text(
                     "R\$ ${total.toStringAsFixed(2)}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.indigo,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.indigo),
                   ),
-                  // --- BOTÃO DE FINALIZAR RECOLOCADO AQUI ---
                   IconButton(
-                    icon: const Icon(
-                      Icons.check_circle_outline,
-                      color: Colors.indigo,
-                    ),
-                    onPressed: docs.isEmpty
-                        ? null
-                        : () => _finalizarCompra(docs, total),
+                    icon: const Icon(Icons.check_circle_outline, color: Colors.indigo),
+                    onPressed: docs.isEmpty ? null : () => _finalizarCompra(docs, total),
                   ),
                 ],
               );
             },
           ),
+          /* // SINO: Notificação Local
           IconButton(
-            icon: const Icon(Icons.notifications_active),
-            onPressed: () => NotificationService().showTestNotification(),
+            icon: const Icon(Icons.notifications_active, color: Colors.indigo),
+            onPressed: () {
+              NotificationService().showTestNotification();
+            },
           ),
+          // NUVEM: Simulação de Recebimento
+          IconButton(
+            icon: const Icon(Icons.cloud_download, color: Colors.orange),
+            onPressed: () {
+              // Chamamos o método de exibição para provar que o app está pronto para receber
+              NotificationService().showTestNotification();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Simulação de mensagem remota disparada!")),
+              );
+            },
+          ), */
         ],
       ),
       drawer: const AppDrawer(),
@@ -192,14 +169,14 @@ class _HomePageState extends State<HomePage> {
         onPressed: () => _exibirDialogoAdicionar(),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _db
-            .collection('compras')
+        stream: _db.collection('compras')
             .where('familiaId', isEqualTo: _familiaId)
             .orderBy('finalizado', descending: false)
             .snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData)
+          if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
+          }
           final docs = snapshot.data!.docs;
 
           return ListView.builder(
@@ -207,8 +184,7 @@ class _HomePageState extends State<HomePage> {
             itemBuilder: (context, index) {
               final item = docs[index];
               bool finalizado = item['finalizado'] ?? false;
-              double precoTotal =
-                  (item['preco'] ?? 0.0) * (item['quantidade'] ?? 1);
+              double precoTotal = (item['preco'] ?? 0.0) * (item['quantidade'] ?? 1);
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -217,28 +193,24 @@ class _HomePageState extends State<HomePage> {
                   leading: Checkbox(
                     value: finalizado,
                     activeColor: Colors.indigo,
-                    onChanged: (val) =>
-                        item.reference.update({'finalizado': val}),
+                    onChanged: (val) {
+                      item.reference.update({'finalizado': val});
+                    },
                   ),
                   title: Text(
                     item['nome'].toString().toUpperCase(),
                     style: TextStyle(
-                      decoration: finalizado
-                          ? TextDecoration.lineThrough
-                          : null,
+                      decoration: finalizado ? TextDecoration.lineThrough : null,
                       fontWeight: FontWeight.bold,
                       color: finalizado ? Colors.grey : Colors.indigo[900],
                     ),
                   ),
-                  subtitle: Text(
-                    "${item['quantidade']}x R\$ ${item['preco'].toStringAsFixed(2)} = R\$ ${precoTotal.toStringAsFixed(2)}",
-                  ),
+                  subtitle: Text("${item['quantidade']}x R\$ ${item['preco'].toStringAsFixed(2)} = R\$ ${precoTotal.toStringAsFixed(2)}"),
                   trailing: IconButton(
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.redAccent,
-                    ),
-                    onPressed: () => item.reference.delete(),
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    onPressed: () {
+                      item.reference.delete();
+                    },
                   ),
                 ),
               );
@@ -279,10 +251,7 @@ class _HomePageState extends State<HomePage> {
               }
               Navigator.pop(context);
             },
-            child: const Text(
-              "Adicionar",
-              style: TextStyle(color: Colors.indigo),
-            ),
+            child: const Text("Adicionar", style: TextStyle(color: Colors.indigo)),
           ),
         ],
       ),
